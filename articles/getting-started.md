@@ -72,7 +72,11 @@ execution time, and we're certainly not going to be able to do
 anything significant in the short amount of time we have together. But
 we're not going to be stupid and use [association-lists][]
 where we need hash tables or anything. It just means that we're not
-going to write an optimizing JIT compiler (sorry).
+going to write an optimizing JIT compiler (sorry, it's just not our
+bailiwick this time).
+
+We should also end up with a thread-safe implementation, so that
+multiple instances of our Lisp can run in the same process.
 
 ### A "conforming implementation"
 
@@ -96,7 +100,7 @@ tells us exactly what we need to do:
  > accomplish a feature of the language that is specified in this
  > standard.
  
-Easy as pie.
+Easy as pie!
 
 And it's in this way that our development will be guided along. We'll
 jump into the spec at the beginning, reading every page (probably not
@@ -104,10 +108,12 @@ sequentially) and writing code as we go. We'll document
 [implementation-defined][impl-defined] behavior (but not necessarily
 [implementation-*dependent*][impl-dependent] behavior -- big
 difference) as the spec
-[asks us to](http://clhs.lisp.se/Body/01_eab.htm). I expect it'll
-actually be a pretty fun experience in reading standards documents,
-too, which is an invaluable skill especially as you get closer to
-hardware where precise and complete specifications are more precious.
+[asks us to](http://clhs.lisp.se/Body/01_eab.htm). I haven't read much
+of the spec except for the documentation on specific functions, so I
+expect it'll actually be a pretty fun experience in reading standards
+documents, too, which is an invaluable skill especially as you get
+closer to hardware where precise and complete specifications are more
+precious.
 
 ## Implementation details
 
@@ -130,15 +136,23 @@ going to use C++. It's too big to fail.
 
 But C++ is a big language, bigger than Lisp, and we have a lot of
 temptations to resist. You're going to want to use design
-patterns. You're going to want to use templates for
-[SFINAE][]. You're going to want to use all the fancy features
-of C++11/14/17. But we're going to try not to get too caught up in the
-design of class hierarchies, metaprogramming, and some other third
-thing to be swallowed up by the wiles of the Lotus Eaters. We want to
-write something that doesn't depend too much on one language;
-something durable, something independent of the whims and caprices of
-our fickle age, like [TAOCP][] (but maybe just a little
-less... *Knuth*). So C++ it is. We could also use C, but LOL NO.
+patterns. You're going to want to use templates for [SFINAE][] and
+[CRTP][]. You're going to want to use `constexpr`. But we're going to
+try not to get too caught up in the design of class hierarchies,
+metaprogramming, and some other third thing to be swallowed up by the
+wiles of the Lotus Eaters. We want to write something that doesn't
+depend too much on one language; something durable, something
+independent of the whims and caprices of our fickle age, like
+[TAOCP][] (but maybe just a little less... *Knuth*, because we don't
+have a hundred years to do this). So C++ it is. We could also use C,
+but LOL NO.
+
+That being said, we are going to use C++11 because it will make
+certain things much clearer and other things possible without external
+libraries (like `std::atomic` for example). But I don't expect
+everyone to be a C++ Language Lawyer, so I'll introduce C++11 features
+as we use them and we'll use them sparingly. And I sure as fire ain't
+gonna put up with the stupid `>>` "problem" in earlier C++.
 
 Of course, diversity is healthy, so if you want to follow along in a
 language of your own choosing, that'll be great too. Let me know if
@@ -156,6 +170,7 @@ So with the pleasantries out of the way, let's get started!
 [nreverse]: http://clhs.lisp.se/Body/f_revers.htm
 [rplacd]: http://clhs.lisp.se/Body/f_rplaca.htm
 [SFINAE]: https://en.wikipedia.org/wiki/Substitution_failure_is_not_an_error
+[CRTP]: https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern
 [TAOCP]: http://www-cs-faculty.stanford.edu/~uno/taocp.html
 [impl-defined]: http://clhs.lisp.se/Body/26_glo_i.htm#implementation-defined
 [impl-dependent]: http://clhs.lisp.se/Body/26_glo_i.htm#implementation-dependent

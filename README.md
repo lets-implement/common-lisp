@@ -9,6 +9,7 @@ will be updated as new articles are written.
 Here's a list of articles:
 
 1. [Getting Started/Introduction](articles/getting-started.md)
+2. [`int main()`](articles/int-main.md)
 
 This work is licensed under the MIT license (see [LICENSE](LICENSE)).
 
