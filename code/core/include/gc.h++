@@ -2,11 +2,10 @@
 #ifndef GCC_HPP
 #define GCC_HPP
 
-#include <vector>
+#include <list>
 #include <type_traits>
 
 #include "object.h++"
-#include "thread_safe.h++"
 
 namespace picl {
     /* Pointers to lisp_objects that are not stored in other
@@ -62,23 +61,14 @@ namespace picl {
         template<typename T>
         lisp_object_handle allocate() {
             auto new_object = new T();
-
             lisp_object_handle retval = &new_object;
-
-            // the above assignment involves an atomic operation, so
-            // it is not possible for it to be reordered after the
-            // following push_back() call. That's important because we
-            // don't want the garbage collector to examine an object
-            // before other objects have references to it and also
-            // before we've added a cref to it.
-
             allocated_objects.push_back(&new_object);
 
             return retval;
         }
 
     private:
-        thread_safe::boundary_slist<object*> allocated_objects;
+        std::list<object*> allocated_objects;
     };
 }
 

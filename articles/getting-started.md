@@ -149,14 +149,23 @@ but LOL NO.
 
 That being said, we are going to use C++11 because it will make
 certain things much clearer and other things possible without external
-libraries (like `std::atomic` for example). But I don't expect
-everyone to be a C++ Language Lawyer, so I'll introduce C++11 features
-as we use them and we'll use them sparingly. And I sure as fire ain't
-gonna put up with the stupid `>>` "problem" in earlier C++.
+libraries. But I don't expect everyone to be a C++ Language Lawyer, so
+I'll introduce C++11 features as we use them and we'll use them
+sparingly. And I sure as fire ain't gonna put up with the stupid `>>`
+"problem" in earlier C++.
 
 Of course, diversity is healthy, so if you want to follow along in a
 language of your own choosing, that'll be great too. Let me know if
 you do and I'll link to your GitHub project.
+
+## How we're going to procede
+
+After we get a few classes written, we'll use a kinda of recursive
+design methodology; we'll jump into an interesting function, create
+the interfaces for everything that function requires, write the
+function, and then recursively fill in those interfaces. Eventually
+we'll visit every function this way and before you know it, we'll be
+done!
 
 So with the pleasantries out of the way, let's get started!
 

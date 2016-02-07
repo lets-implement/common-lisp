@@ -117,9 +117,60 @@ in our lisp. We need to be able to identify the type of these objects
 at runtime, so I've got the `lisp_type` enum in there, and `gc_info`
 for when we work on the GC.
 
+Actually, forget that. We don't want to have to maintain a central
+list of object IDs, we want to be able to create one when we need it
+without modifying `object.h++`. We *could* implement a compile-time
+string hash and base the object ID on a combination of the filename
+and line number (obtainable with the `__FILE__` and `__LINE__`
+preprocessor macros) at which the object ID declaration appears, and
+that would be cool because then all the object IDs would be
+compile-time constants. Even though the code for that is quite simple
+with `constexpr` and I *really* want to do it (*note from the future:
+I did in fact do it, but I reverted the change*), the implementation
+would be distracting and the performance gained wouldn't be sufficient
+to justify preempting our mandate of simplicity. Therefore we'll just
+make a static function on `lisp_object` that keeps a counter. (This
+also absolves us of having to think about the unlikely event of a hash
+collision.)
+
+Let's add that to `lisp_object`:
+
+        static lisp_type_t get_new_object_id(std::string classname) {
+            object_id_to_name.push_back(std::move(classname));
+            return object_id_to_name.size() - 1;
+        }
+
+    private:
+        static std::vector<std::string> object_id_to_name;
+
+As a bonus, we'll keep a record of object IDs to class names in case
+that comes in handy later.
+
+This necessitates creating our first new C++ file, `object.c++`, which
+will be the home of `lisp_object::object_id_to_name`:
+
+    #include <picl/object.h++>
+    
+    namespace picl {
+        std::vector<std::string> lisp_object::object_id_to_name;
+    }
+
+And thanks to the way we wrote our `CMakeLists.txt`, we don't even
+have to modify it to get this source file to compile.
+
+In summary, instead of having that global `enum`, we can create the
+object IDs inside the classes themselves, as we'll demonstrate
+later. We'll add a quick typedef for `lisp_type_t` to `lisp_object` to
+be used whenever we declare a variable to hold one of these object
+IDs.
+
+Onward!
+
+## Garbage collection: first thoughts
+
 We actually need to start thinking about the garbage collector
-immediately, because GCs are pretty invasive and it will affect what
-decisions we make when coding in the near future.
+immediately, because GCs can be pretty invasive and it will affect
+what decisions we make when coding in the near future.
 
 [The Boehm GC][boehm-gc] is a well-regarded conservative GC library
 for C, but using it would violate the requirement about having no
@@ -132,31 +183,25 @@ implementations. This is probably going to lead to cringe-worthy
 performance, but we need to tightly focus on our stated goals of
 simplicity and short development time.
 
-Let's also not do anything in the code that would preclude us from
-using a concurrent collector if we don't have to. Since we're going to
-be manipulating these pointers from C, the GC should deallocate an
-object if and only if the object is not reachable from the root set
-**and** the object isn't reachable from native code. I think we should
-use a smart-pointer class to help us out; it'll just increment a
-reference count in a `lisp_object` when we refer to it from C, and
-decrement it when it goes out of scope. I'll name it
-`lisp_object_handle`, and the code will be boiler-platey enough not to
-be listed here. The only notable C++11 features we use are `auto` for
-compile-time variable type deduction and [move-constructors][] which
-should be straightforward.
+Since we're going to be manipulating these pointers from C, the GC
+should deallocate an object if and only if the object is not reachable
+from the root set **and** the object isn't reachable from native
+code. I think we should use a smart-pointer class to help us out;
+it'll just increment a reference count in a `lisp_object` when we
+refer to it from C, and decrement it when it goes out of scope. I'll
+name it `lisp_object_handle`, and the code will be boiler-platey
+enough not to be listed here. The only notable C++11 features we use
+are `auto` for compile-time variable type deduction and
+[move-constructors][] which should be straightforward.
 
 We updated `gc_info` to look like this now:
 
     struct gc_info {
-        // The initialization of crefcount isn't atomic, but I don't
-        // think it needs to be.
         gc_info() : crefcount(0) { }
 
-        std::atomic_uint_fast32_t crefcount;
+        unsigned int crefcount;
     };
     
-This makes use of C++11's nice `atomic` header for atomic ops.
-
 Let's start `gc.h++` now too. Besides housing `lisp_object_handle`,
 it'll hold the `gc` class which will manage garbage collection.
 
@@ -166,24 +211,18 @@ it'll hold the `gc` class which will manage garbage collection.
         lisp_object_handle allocate() {
             auto new_object = new T();
             lisp_object_handle retval = &new_object;
-
-            // the above assignment involves an atomic operation, so
-            // it is not possible for it to be reordered around the
-            // following push_back() call.
-
             allocated_objects.push_back(&new_object);
 
             return retval;
         }
 
     private:
-        thread_safe::boundary_slist<object*> allocated_objects;
+        std::list<object*> allocated_objects;
     };
 
 A simple `allocate` function is templated on a subtype of
 `lisp_object`. It merely allocates a `T` calling the default
-constructor, saves a handle and then adds it to the object list (order
-is important there for if we ever have a concurrent allocator!). The
+constructor, saves a handle and then adds it to the object list. The
 object list will hold a pointer to every object allocated with that
 GC; then later when we implement the mark-and-sweep part, we'll use
 that list and some other things (like the stack, dynamic environment,
@@ -192,29 +231,23 @@ this `allocated_objects` and `delete` everything that's not marked
 reachable and remove those deleted pointers from the list. And there's
 our GC.
 
-(The `thread_safe::boundary_slist` is just a hacked together hopefully
-thread-safe singly-linked list which will allow multiple allocating
-threads and one garbage collector thread to run concurrently. The
-implementation isn't anything remarkable so we won't go into detail,
-but if you're good with multithreading then please take a look at it
-to verify correctness and perhaps improve unnecessary bad
-performance. It's in `thread-safe.h++`.)
-
 Obviously we haven't yet put the "C" in our "GC" yet, but that's ok
 for the time being, because we want to focus on the meat of our
 interpreter before making sure the whole thing isn't just one giant
 memory leak.
 
-Let's go ahead and make the classes whose types we've declared in the
-`lisp_type` enum:
+## Lisp type classes
 
-    using atomic_lisp_ptr = std::atomic<lisp_object*>;
+Let's go ahead and make the classes whose types we had formerly
+declared in the `enum`:
 
     class NIL : public lisp_object {
     private:
         NIL() : lisp_object(NIL_T) { }
 
     public:
+        static const auto NIL_T = get_new_object_id("NIL");
+
         static NIL* get_nil() {
             static NIL nil_instance;
             &nil_instance;
@@ -223,32 +256,33 @@ Let's go ahead and make the classes whose types we've declared in the
 
     class CONS : public lisp_object {
     public:
-        CONS() : lisp_object(CONS_T), car(nullptr), cdr(nullptr) { }
+        static const auto CONS_T = get_new_object_id("CONS");
 
-        atomic_lisp_ptr car, cdr;
+        CONS() : lisp_object(CONS_T) { }
+
+        OBJECT* car = nullptr, * cdr = nullptr;
     };
 
     class FIXNUM : public lisp_object {
     public:
-        FIXNUM() : lisp_object(FIXNUM_T), number() { }
+        static const auto FIXNUM_T = get_new_object_id("FIXNUM");
 
-        long number;
+        FIXNUM(long n) : lisp_object(FIXNUM_T), number(n) { }
+
+        const long number;
     };
 
     class STRING : public lisp_object {
     public:
+        static const auto STRING_T = get_new_object_id("STRING");
+
         STRING() : lisp_object(STRING_T) { }
 
         std::string data;
     };
-
-That `atomic_lisp_ptr` is just an atomically readable/writable
-pointer, and we use it so that the GC thread can read from an object's
-variables without locking it or anything. On x86 and x64, memory
-writes and reads to words are atomic anyway, so there won't be any
-performance degradation if we don't make it use barriers, which we can
-avoid by using `std::memory_order_relaxed` to the `read` and `store`
-whenever we read from or write to these variables.
+    
+There you can see we used `GENERATE_LISP_OBJECT_ID` in each of these
+classes to create the object IDs.
 
 `NIL` is going to be a singleton instance, and we'll provide a handy
 access to it via `picl::nil` (and since this object isn't in the gc's
@@ -365,11 +399,13 @@ of, so let's pull an excerpt from that here:
 > consequences are undefined if an attempt is made to change the
 > functional value of a symbol that names a special form.
 
-In that first paragraph, a "cell" might or might not have some special
-meaning, but thankfully the "internal representation of symbols and
-their attributes is implementation-dependent" so we can just add some
-member variables to our `SYMBOL` class corresponding to (some of)
-the "cells" the spec mentions.
+In that first paragraph, the word "cell" might or might not have some
+special meaning in lisp (that is, a "cell" might be something settable
+by a lisp function or whatever), but thankfully the "internal
+representation of symbols and their attributes is
+implementation-dependent" so we can just add some member variables to
+our `SYMBOL` class corresponding to (some of) the "cells" the spec
+mentions.
 
 We obviously have to have a name and home package (but that means we
 need to create a `PACKAGE` class too). As for the property list,
@@ -380,21 +416,25 @@ So here's our `SYMBOL` class.
 
     class SYMBOL : public lisp_object {
     public:
-        SYMBOL() : lisp_object(SYMBOL_T), home_package(0) { }
+        static const auto SYMBOL_T = get_new_object_id("SYMBOL");
+
+        SYMBOL(std::string r) : lisp_object(SYMBOL_T), repr(std::move(r)) { }
 
         const std::string repr;
-        std::atomic<PACKAGE*> home_package;
+        PACKAGE* home_package = nullptr;
     };
 
-What about `PACKAGE`? A packages is simply "a namespace that maps
+What about `PACKAGE`? A package is simply "a namespace that maps
 symbol names to symbols". Well, that basically tells us exactly what
 we need to put in our class:
 
     class PACKAGE : public lisp_object {
     public:
+        static const auto PACKAGE_T = get_new_object_id("PACKAGE");
+
         PACKAGE() : lisp_object(PACKAGE_T) { }
 
-        std::unordered_map<std::string, std::atomic<SYMBOL*>> symbols;
+        std::unordered_map<std::string, SYMBOL*> symbols;
     };
 
 We'll have to come back to this and refine it later when we start
@@ -422,3 +462,4 @@ started next time.
 [undefined-behavior-cpp]: http://blog.regehr.org/archives/213
 [utf-9-18]: https://www.ietf.org/rfc/rfc4042.txt
 [std-chars]: http://clhs.lisp.se/Body/26_glo_s.htm#standard_character
+[jenkinss_hash]: https://en.wikipedia.org/wiki/Jenkins_hash_function
