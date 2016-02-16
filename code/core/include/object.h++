@@ -11,6 +11,8 @@
 #include <unordered_map>
 
 namespace picl {
+    class interpreter;
+
     struct gc_info {
         gc_info() : crefcount(0) { }
 
@@ -97,6 +99,15 @@ namespace picl {
         PACKAGE() : lisp_object(PACKAGE_T) { }
 
         std::unordered_map<std::string, SYMBOL*> symbols;
+    };
+
+    class FUNCTION : public lisp_object {
+    public:
+        static const auto FUNCTION_T = get_new_object_id("FUNCTION");
+
+        FUNCTION() : lisp_object(FUNCTION_T) { }
+
+        virtual std::uint32_t call(interpreter*, std::uint32_t arg_count) = 0;
     };
 
     class READTABLE : public lisp_object {

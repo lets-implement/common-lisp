@@ -112,7 +112,7 @@ installed by
 > digits were read, they are converted into a corresponding integer
 > infix parameter P; otherwise, the infix parameter P is nil. The
 > terminating non-digit C2 is a character (sometimes called a
-> ``sub-character'' to emphasize its subordinate role in the
+> "sub-character" to emphasize its subordinate role in the
 > dispatching) that is looked up in the dispatch table associated with
 > the dispatching macro character C1. The reader macro function
 > associated with the sub-character C2 is invoked with three
@@ -270,7 +270,7 @@ that you can chase any links that take your fancy).
 > reader processes macro characters.
 
 Well this immediately lets us know that we have to set up our
-interfaces for character streams.
+interfaces for character streams and the functions thereof.
 
 > When dealing with tokens, the reader's basic function is to
 > distinguish representations of symbols from those of numbers. When a
@@ -291,14 +291,19 @@ that at the moment and we can implement handling for things like
 A "potential number" is just an implementation-defined syntax for
 numbers, but our implementation isn't going to support any extra
 numerical syntaxes, so for all intensive porpoises "potential number"
-and "number" are synonymous.
+
+and "number" are synonymous. (Plain-text readers, sorry for the inline
+HTML, but Markdown stupidly doesn't allow beginning a list from a
+number other than 1.)
 
 > The algorithm performed by the Lisp reader is as follows:
 > 
-> 1. If at end of file, end-of-file processing is performed as
->    specified in `read`. Otherwise, one character, *x*, is read from the
->    input stream, and dispatched according to the syntax type of *x* to
->    one of steps 2 to 7.
+> <ol start="1">
+> <li>If at end of file, end-of-file processing is performed as
+>     specified in read. Otherwise, one character, <i>x</i>, is read from the
+>     input stream, and dispatched according to the syntax type of <i>x</i> to
+>     one of steps 2 to 7.</li>
+> </ol>
 
 We'll have to look at the
 [documentation for `READ` and `READ-PRESERVING-WHITESPACE`](http://clhs.lisp.se/Body/f_rd_rd.htm#read)
@@ -337,6 +342,187 @@ And, in the **Exceptional Situations** notes at the bottom,
 > the end of file.
 
 So that means that we have to set up the interface for errors.
+
+> <ol start="2"><li>If <i>x</i> is an invalid character, an error of type
+> reader-error is signaled.</li></ol>
+
+There's errors again.
+
+> <ol start="3"><li>If <i>x</i> is a whitespace[2] character, then it is
+> discarded and step 1 is re-entered.</li></ol>
+
+Nothing to see here.
+
+> <ol start="4"><li>
+>    <p>If <i>x</i> is a terminating or non-terminating macro character then its
+>    associated reader macro function is called with two arguments,
+>    the input stream and x.</p>
+>
+>    <p>The reader macro function may read characters from the input stream;
+>    if it does, it will see those characters following the macro
+>    character. The Lisp reader may be invoked recursively from the
+>    reader macro function.</p>
+> 
+>    <p>The reader macro function must not have any side effects other than
+>    on the input stream; because of backtracking and restarting of the
+>    read operation, front ends to the Lisp reader (e.g., "editors" and
+>    "rubout handlers") may cause the reader macro function to be
+>    called repeatedly during the reading of a single expression in which
+>    <i>x</i> only appears once.</p>
+> 
+>    <p>The reader macro function may return zero values or one value. If
+>    one value is returned, then that value is returned as the result of
+>    the read operation; the algorithm is done. If zero values are
+>    returned, then step 1 is re-entered.</p>
+> </ol>
+
+Therefore we need the ability to invoke function calls when a macro
+character is encountered.
+
+> <ol start="5"><li>
+>    If <i>x</i> is a single escape character then the next character, <i>y</i>, is
+>    read, or an error of type end-of-file is signaled if at the end of
+>    file. <i>y</i> is treated as if it is a constituent whose only constituent
+>    trait is alphabetic. <i>y</i> is used to begin a token, and step 8 is
+>    entered.
+> </li></ol>
+
+Whenever we encounter an escaped character, we don't check if it's a
+macro character or whatever. We just begin a token.
+
+> <ol start="6"><li>
+> If <i>x</i> is a multiple escape character then a token
+> (initially containing no characters) is begun and step 9 is entered.
+> </li></ol>
+
+Ok.
+
+> <ol start="7"><li>
+>    If <i>x</i> is a constituent character, then it begins a
+>    token. After the token is read in, it will be interpreted either
+>    as a Lisp object or as being of invalid syntax. If the token
+>    represents an object, that object is returned as the result of
+>    the read operation. If the token is of invalid syntax, an error
+>    is signaled. If <i>x</i> is a character with case, it might be
+>    replaced with the corresponding character of the opposite case,
+>    depending on the readtable case of the current readtable, as
+>    outlined in <a href="http://clhs.lisp.se/Body/23_ab.htm">Section
+>    23.1.2 (Effect of Readtable Case on the Lisp
+>    Reader)</a>. <i>X</i> is
+>    used to begin a token, and step 8 is entered.
+> </li></ol>
+
+Recall that a "token" is for us either a number or a symbol since we
+won't support potential numbers.
+
+> <ol start="8"><li>
+>     At this point a token is being accumulated, and an even number
+>     of multiple escape characters have been encountered. If at end
+>     of file, step 10 is entered. Otherwise, a character, <i>y</i>, is read,
+>     and one of the following actions is performed according to its
+>     syntax type:
+>      <ul><li>If <i>y</i> is a constituent or non-terminating macro character:
+>              <ul><li>If <i>y</i> is a character with case, it might be replaced with the
+>                      corresponding character of the opposite case, depending on the
+>                      readtable case of the current readtable, as outlined in Section
+>                      23.1.2 (Effect of Readtable Case on the Lisp Reader).</li>
+>                  <li><i>Y</i> is appended to the token being built.</li>
+>                  <li>Step 8 is repeated.</li>
+>              </ul>
+>         <li>If <i>y</i> is a single escape character, then the next character, <i>z</i>,
+>             is read, or an error of type end-of-file is signaled if at end of
+>             file. <I>Z</I> is treated as if it is a constituent whose only
+>             constituent trait is alphabetic[2]. <I>Z</I> is appended to the token
+>             being built, and step 8 is repeated.</li>
+>         <li>If <i>y</i> is a multiple escape character, then step 9 is entered.</li>
+>         <li>If <i>y</i> is an invalid character, an error of type reader-error is signaled.</li>
+>         <li>If <i>y</i> is a terminating macro character, then it terminates the
+>             token. First the character <i>y</i> is unread (see unread-char), and then
+>             step 10 is entered.</li>
+>         <li>If <i>y</i> is a whitespace[2] character, then it terminates the
+>             token. First the character <i>y</i> is unread if appropriate (see
+>             read-preserving-whitespace), and then step 10 is entered.</li>
+>      </ul>
+> </li></ol>
+
+You can see the components of the code we'll write in this description
+of the algorithm; a while-loop, a switch or a sequence of
+if-statements.
+
+> <ol start="9"><li>
+> At this point a token is being accumulated, and an odd number of
+> multiple escape characters have been encountered. If at end of file,
+> an error of type end-of-file is signaled. Otherwise, a character, <i>y</i>,
+> is read, and one of the following actions is performed according to
+> its syntax type:
+>   <ul>
+>     <li>If <i>y</i> is a constituent, macro, or whitespace[2]
+>         character, <i>y</i> is treated as a constituent whose only
+>         constituent trait is alphabetic[2]. <I>Y</I> is appended to
+>         the token being built, and step 9 is repeated.</li>
+>     <li> If <i>y</i> is a single escape character, then the next
+>          character, <i>z</i>, is read, or an error of type end-of-file is
+>          signaled if at end of file. <I>Z</I> is treated as a constituent
+>          whose only constituent trait is alphabetic[2]. <I>Z</I> is appended
+>          to the token being built, and step 9 is repeated.</li>
+>     <li>If <i>y</i> is a multiple escape character, then step 8 is
+>         entered.</li>
+>     <li>If <i>y</i> is an invalid character, an error of type
+>         reader-error is signaled.</li>
+>   </ul>
+> </li></ol>
+
+Pretty straightforward. It's really nice how the writers say "At this
+point, *blah* has happened," don't you think?
+
+> <ol start="10"><li>
+> An entire token has been accumulated. The object represented by the
+> token is returned as the result of the read operation, or an error of
+> type reader-error is signaled if the token is not of valid syntax.
+> </li></ol>
+
+### Summary of required interfaces
+
+Here's a summary of the stuff we need to create interfaces for (we can
+implement them later) before we write the reader algorithm:
+
+1. Error/signals interface
+2. Function calls
+3. The stream class and some of its functions
+
+Not too bad, eh? Let's start with function calls. We actually already
+used them in our declaration of the `READTABLE` class above without
+providing a declaration.
+
+### Function calls
+
+I think we'll make a class with a virtual `call` member function that
+will execute the body of the function, and it'll take its arguments
+and return its values on the stack. We can then make subclasses of
+this class later so that we can easily call interpreted lisp code or
+native C++ code with a uniform interface.
+
+In our old friend `object.h`:
+
+    class interpreter;
+
+    class FUNCTION : public lisp_object {
+    public:
+        static const auto FUNCTION_T = get_new_object_id("FUNCTION");
+
+        FUNCTION() : lisp_object(FUNCTION_T) { }
+
+        virtual std::uint32_t call(interpreter*, std::uint32_t arg_count) = 0;
+    };
+
+Next, let's get the interface for errors and signals prototyped out.
+
+### Errors
+
+Common Lisp's "signal" system is a bit exotic compared to most other
+languages. It not only allows for non-local control-flow like C++ and
+family's exceptions do, but it also allows control to be *resumed*
+from where it left off 
 
 [meta-circular]: https://en.wikipedia.org/wiki/Meta-circular_evaluator
 [previous-article]: int-main.md
